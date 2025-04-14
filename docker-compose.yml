@@ -70,7 +70,7 @@ services:
     depends_on:
       - backend
     environment:
-      - REACT_APP_API_URL=http://localhost:3001
+      - REACT_APP_API_URL=http://65.20.109.29:3001
       - REACT_APP_ARBITRUM_ERC20_ADDRESS=${ARBITRUM_ERC20_ADDRESS}
       - REACT_APP_OPTIMISM_ERC20_ADDRESS=${OPTIMISM_ERC20_ADDRESS}
     ports:
