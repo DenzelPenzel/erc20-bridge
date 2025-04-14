@@ -1,0 +1,54 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Network {
+  arbitrumSepolia
+  optimismSepolia
+}
+
+enum TransactionStatus {
+  pending
+  processing
+  completed
+  failed
+  recovery_in_progress
+}
+
+enum EventType {
+  burn
+  mint
+}
+
+model BridgeTransaction {
+  id                    String            @id @default(uuid())
+  recipient             String
+  amount                String
+  sourceNetwork         Network
+  targetNetwork         Network
+  sourceTransactionHash String?
+  blockHash             String?
+  targetTransactionHash String?
+  status                TransactionStatus @default(pending)
+  gelatoTaskId          String?
+  recoveryAttempts      Int               @default(0)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([recipient])
+  @@index([sourceTransactionHash])
+  @@index([status])
+  @@index([gelatoTaskId])
+  @@index([createdAt])
+  @@index([recipient, status])
+  @@index([sourceNetwork, targetNetwork, status])
+  @@map("bridge_transactions")
+}

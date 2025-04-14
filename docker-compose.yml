@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: erc20-bridge-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: erc20_bridge
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: erc20-bridge-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: erc20-bridge-backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - PORT=3001
+      - NODE_ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/erc20_bridge?schema=public
+      - PRIVATE_KEY=${PRIVATE_KEY}
+      - RPC_ARBITRUMSEPOLIA=${RPC_ARBITRUMSEPOLIA}
+      - RPC_OPSEPOLIA=${RPC_OPSEPOLIA}
+      - ARBITRUM_ERC20_ADDRESS=${ARBITRUM_ERC20_ADDRESS}
+      - OPTIMISM_ERC20_ADDRESS=${OPTIMISM_ERC20_ADDRESS}
+      - GELATO_API_KEY=${GELATO_API_KEY}
+      - GELATO_1BALANCE_ADDRESS=${GELATO_1BALANCE_ADDRESS}
+    ports:
+      - "3001:3001"
+
+  frontend:
+    build:
+      context: ./bridge-ui
+      dockerfile: Dockerfile
+    container_name: erc20-bridge-frontend
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      - REACT_APP_API_URL=http://localhost:3001
+      - REACT_APP_ARBITRUM_ERC20_ADDRESS=${ARBITRUM_ERC20_ADDRESS}
+      - REACT_APP_OPTIMISM_ERC20_ADDRESS=${OPTIMISM_ERC20_ADDRESS}
+    ports:
+      - "80:80"
+
+volumes:
+  postgres-data:
+  redis-data:
