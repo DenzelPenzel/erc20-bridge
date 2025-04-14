@@ -7,9 +7,9 @@ import { Queue } from 'bull';
 import { ethers } from 'ethers';
 import { GelatoRelay } from '@gelatonetwork/relay-sdk';
 import { PrismaService } from '../prisma/prisma.service';
-import { BridgeRequest, Network, TaskState, TransactionStatus } from '../types';
+import { BridgeRequest, Network, TransactionStatus } from '../types';
 import MockERC20Abi from '../contracts/abi/MockERC20.json';
-import { getChainId, sleep } from '../utils';
+import { getChainId } from '../utils';
 
 @Processor('bridge')
 export class BridgeProcessor {

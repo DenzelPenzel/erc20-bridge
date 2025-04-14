@@ -2,7 +2,6 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ethers } from 'ethers';
 import { GelatoRelay } from '@gelatonetwork/relay-sdk';
-import { PrismaService } from '../prisma/prisma.service';
 import { Network, TransactionStatus } from '../types';
 import MockERC20Abi from '../contracts/abi/MockERC20.json';
 
@@ -13,10 +12,7 @@ export class MintService {
   private readonly contracts: Record<Network, ethers.Contract>;
   private readonly gelatoRelay: GelatoRelay;
 
-  constructor(
-    private prisma: PrismaService,
-    private configService: ConfigService,
-  ) {
+  constructor(private configService: ConfigService) {
     this.providers = {
       [Network.ARBITRUM_SEPOLIA]: new ethers.providers.JsonRpcProvider(
         this.configService.get<string>('ARBITRUM_SEPOLIA_RPC_URL') ||
