@@ -20,13 +20,6 @@ export interface Transaction {
   gelatoTaskId?: string;
 }
 
-export interface BridgeRequest {
-  amount: string;
-  sourceChain: string;
-  destinationChain: string;
-  address: string;
-}
-
 export interface PaginationInfo {
   total: number;
   limit: number;
@@ -37,11 +30,6 @@ export interface PaginationInfo {
 export interface TransactionsResponse {
   transactions: Transaction[];
   pagination: PaginationInfo;
-}
-
-export interface PaginationParams {
-  page: number;
-  limit: number;
 }
 
 export interface MintTokensRequest {

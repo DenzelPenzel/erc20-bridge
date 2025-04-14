@@ -18,8 +18,7 @@ const BridgeForm: React.FC = () => {
     error: web3Error, 
     connectWallet, 
     switchNetwork,
-    burnTokens,
-    getBalance 
+    getBalance
   } = useWeb3();
 
   const bridgeMutation = useMutation({
