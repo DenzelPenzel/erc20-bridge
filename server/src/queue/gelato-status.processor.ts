@@ -5,11 +5,18 @@ import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { ethers } from 'ethers';
-import { GelatoRelay, TaskState } from '@gelatonetwork/relay-sdk';
+import {
+  GelatoRelay,
+  TaskState,
+  CallWithERC2771Request,
+} from '@gelatonetwork/relay-sdk-viem';
 import { PrismaService } from '../prisma/prisma.service';
 import { Network, TransactionStatus } from '../types';
 import { getChainId } from '../utils';
 import MockERC20Abi from '../contracts/abi/MockERC20.json';
+import { createWalletClient, http, type Chain } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { arbitrumSepolia, optimismSepolia } from 'viem/chains';
 
 export interface GelatoStatusJobData {
   taskId: string;
@@ -28,6 +35,7 @@ export interface GelatoRecoveryJobData {
   sourceNetwork: Network;
   targetNetwork: Network;
   recoveryAttempt: number;
+  burnId: string;
 }
 
 const MAX_RECOVERY_ATTEMPTS = 3;
@@ -37,8 +45,9 @@ export class GelatoStatusProcessor {
   private readonly logger = new Logger(GelatoStatusProcessor.name);
   private readonly gelatoRelay: GelatoRelay;
   private readonly contracts: Record<Network, ethers.Contract>;
+  private readonly chains: Record<Network, Chain>;
+  private readonly providers: Record<Network, ethers.providers.JsonRpcProvider>;
 
-  // Rate limiting settings
   private readonly rateLimitWindow = 60000; // 1 minute
   private readonly maxRequestsPerWindow = 1; // Maximum requests per minute
   private requestTimestamps: number[] = [];
@@ -49,21 +58,54 @@ export class GelatoStatusProcessor {
     @InjectQueue('gelato-status') private gelatoStatusQueue: Queue,
     @InjectQueue('gelato-recovery') private gelatoRecoveryQueue: Queue,
   ) {
-    this.gelatoRelay = new GelatoRelay();
+    this.gelatoRelay = new GelatoRelay({
+      contract: {
+        relay1BalanceERC2771: '0xd8253782c45a12053594b9deB72d8e8aB2Fca54c',
+        relayERC2771: '',
+        relayERC2771zkSync: '',
+        relayERC2771Abstract: '',
+        relay1BalanceERC2771zkSync: '',
+        relay1BalanceERC2771Abstract: '',
+        relayConcurrentERC2771: '',
+        relay1BalanceConcurrentERC2771: '',
+        relayConcurrentERC2771zkSync: '',
+        relayConcurrentERC2771Abstract: '',
+        relay1BalanceConcurrentERC2771zkSync: '',
+        relay1BalanceConcurrentERC2771Abstract: '',
+      },
+    });
 
     const apiKey = this.configService.get<string>('GELATO_API_KEY') || '';
     if (!apiKey) {
       throw new Error('Gelato API key not configured');
     }
 
+    this.chains = {
+      [Network.ARBITRUM_SEPOLIA]: arbitrumSepolia,
+      [Network.OPTIMISM_SEPOLIA]: optimismSepolia,
+    };
+
+    this.providers = {
+      [Network.ARBITRUM_SEPOLIA]: new ethers.providers.JsonRpcProvider(
+        this.configService.get<string>('ARBITRUM_SEPOLIA_RPC_URL') ||
+          'https://sepolia-rollup.arbitrum.io/rpc',
+      ),
+      [Network.OPTIMISM_SEPOLIA]: new ethers.providers.JsonRpcProvider(
+        this.configService.get<string>('OPTIMISM_SEPOLIA_RPC_URL') ||
+          'https://sepolia.optimism.io',
+      ),
+    };
+
     this.contracts = {
       [Network.ARBITRUM_SEPOLIA]: new ethers.Contract(
         this.configService.get<string>('ARBITRUM_ERC20_ADDRESS') || '',
         MockERC20Abi,
+        this.providers[Network.ARBITRUM_SEPOLIA],
       ),
       [Network.OPTIMISM_SEPOLIA]: new ethers.Contract(
         this.configService.get<string>('OPTIMISM_ERC20_ADDRESS') || '',
         MockERC20Abi,
+        this.providers[Network.OPTIMISM_SEPOLIA],
       ),
     };
   }
@@ -275,9 +317,25 @@ export class GelatoStatusProcessor {
       this.trackRequest();
 
       const contract = this.contracts[targetNetwork];
+
+      const burnId =
+        job.data.burnId ||
+        `0x${Buffer.from(
+          ethers.utils
+            .solidityKeccak256(
+              ['address', 'uint256', 'uint256', 'string'],
+              [recipient, amount, Date.now(), 'recovery'],
+            )
+            .slice(2),
+          'hex',
+        ).toString('hex')}`;
+
+      this.logger.log(`Using burnId for recovery: ${burnId}`);
+
       const mintData = contract.interface.encodeFunctionData('mint', [
         recipient,
         amount,
+        burnId,
       ]);
 
       const targetContractAddress = this.configService.get<string>(
@@ -298,10 +356,34 @@ export class GelatoStatusProcessor {
         `Sending recovery sponsoredCall to Gelato Relay for network ${targetNetwork}...`,
       );
 
-      const { taskId } = await this.gelatoRelay.sponsoredCall(request, apiKey, {
-        retries: 3,
-        gasLimit: BigInt(500000),
+      const privateKey = this.configService.get<string>('PRIVATE_KEY');
+
+      const account = privateKeyToAccount(privateKey as `0x${string}`);
+
+      const walletClient = createWalletClient({
+        account,
+        chain: this.chains[targetNetwork],
+        transport: http(
+          targetNetwork === Network.ARBITRUM_SEPOLIA
+            ? this.configService.get<string>('ARBITRUM_SEPOLIA_RPC_URL') ||
+                'https://sepolia-rollup.arbitrum.io/rpc'
+            : this.configService.get<string>('OPTIMISM_SEPOLIA_RPC_URL') ||
+                'https://sepolia.optimism.io',
+        ),
       });
+
+      const erc2771Request: CallWithERC2771Request = {
+        chainId: BigInt(this.chains[targetNetwork].id),
+        target: request.target as `0x${string}`,
+        data: request.data as `0x${string}`,
+        user: account.address,
+      };
+
+      const { taskId } = await this.gelatoRelay.sponsoredCallERC2771(
+        erc2771Request,
+        walletClient,
+        apiKey,
+      );
 
       await this.prisma.bridgeTransaction.update({
         where: { id: transaction.id },
@@ -411,57 +493,90 @@ export class GelatoStatusProcessor {
     reason: string,
     recoveryAttempt: number = 0,
   ): Promise<void> {
-    this.logger.error(`Bridge transaction failed: ${reason}`);
+    try {
+      this.logger.log(
+        `Handling failed transaction ${transactionId}: ${reason}`,
+      );
 
-    const transaction = await this.prisma.bridgeTransaction.findUnique({
-      where: { id: transactionId },
-    });
+      const transaction = await this.prisma.bridgeTransaction.findUnique({
+        where: { id: transactionId },
+      });
 
-    if (!transaction) {
-      this.logger.error(`Transaction ${transactionId} not found`);
-      return;
-    }
+      if (!transaction) {
+        this.logger.error(`Transaction ${transactionId} not found`);
+        return;
+      }
 
-    await this.prisma.bridgeTransaction.update({
-      where: { id: transaction.id },
-      data: { status: TransactionStatus.FAILED },
-    });
-
-    // If this wasn't already a recovery attempt
-    // we haven't exceeded max recovery attempts
-    if (recoveryAttempt < MAX_RECOVERY_ATTEMPTS) {
-      await this.gelatoRecoveryQueue.add(
-        'recovery',
-        {
-          transactionId: transaction.id,
-          sourceTransactionHash: transaction.sourceTransactionHash,
-          amount: transaction.amount,
-          recipient: transaction.recipient,
-          sourceNetwork: transaction.sourceNetwork,
-          targetNetwork: transaction.targetNetwork,
-          recoveryAttempt,
+      // Update transaction status to FAILED
+      await this.prisma.bridgeTransaction.update({
+        where: { id: transaction.id },
+        data: {
+          status: TransactionStatus.FAILED,
         },
-        {
-          delay: 30000,
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 30000,
+      });
+
+      this.logger.error(`Transaction ${transactionId} failed: ${reason}`);
+
+      // Only attempt recovery if we haven't exceeded max attempts
+      if (recoveryAttempt < MAX_RECOVERY_ATTEMPTS) {
+        this.logger.log(
+          `Scheduling recovery for transaction ${transactionId} (attempt ${recoveryAttempt + 1})`,
+        );
+
+        const burnId =
+          transaction.burnId ||
+          `0x${Buffer.from(
+            ethers.utils
+              .solidityKeccak256(
+                ['address', 'uint256', 'uint256', 'string'],
+                [
+                  transaction.recipient,
+                  transaction.amount,
+                  Date.now(),
+                  'recovery',
+                ],
+              )
+              .slice(2),
+            'hex',
+          ).toString('hex')}`;
+
+        await this.gelatoRecoveryQueue.add(
+          'recovery',
+          {
+            transactionId: transaction.id,
+            sourceTransactionHash: transaction.sourceTransactionHash || '',
+            amount: transaction.amount,
+            recipient: transaction.recipient,
+            sourceNetwork: transaction.sourceNetwork as Network,
+            targetNetwork: transaction.targetNetwork as Network,
+            recoveryAttempt: recoveryAttempt + 1,
+            burnId: burnId,
           },
-        },
-      );
+          {
+            delay: 30000,
+            attempts: 3,
+            backoff: {
+              type: 'exponential',
+              delay: 30000,
+            },
+          },
+        );
 
-      this.logger.log(`Queued recovery job for transaction ${transactionId}`);
-    } else {
-      this.logger.error(
-        `Max recovery attempts reached for transaction ${transactionId}`,
-      );
+        this.logger.log(
+          `Queued recovery job for transaction ${transactionId} with burnId ${burnId}`,
+        );
+      } else {
+        this.logger.error(
+          `Max recovery attempts reached for transaction ${transactionId}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(`Error handling failed transaction: ${error.message}`);
     }
   }
 
   private canMakeRequest(): boolean {
     const now = Date.now();
-    // Remove old requests
     this.requestTimestamps = this.requestTimestamps.filter(
       (timestamp) => now - timestamp < this.rateLimitWindow,
     );

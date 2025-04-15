@@ -15,7 +15,7 @@ const HistoryTransactions: React.FC = () => {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['history-transactions', account, page],
     queryFn: () => fetchTransactions({
-      address: account || undefined,
+      address: undefined,
       status: [TransactionStatus.COMPLETED, TransactionStatus.FAILED],
       limit: ITEMS_PER_PAGE,
       offset: (page - 1) * ITEMS_PER_PAGE

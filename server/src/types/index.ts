@@ -22,6 +22,7 @@ export interface BridgeRequest {
   sourceNetwork: Network;
   targetNetwork: Network;
   sourceTransactionHash: string;
+  burnId: string;
 }
 
 export enum TaskState {

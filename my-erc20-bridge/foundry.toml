@@ -2,6 +2,10 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+remappings = [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "relay-context-contracts/=lib/relay-context-contracts/contracts/"
+]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
 [fmt]
@@ -15,3 +19,7 @@ quote_style = 'double'
 number_underscore = 'preserve'
 single_line_statement_blocks = 'preserve'
 ignore = ["src/console.sol", "src/console2.sol"]
+
+[etherscan]
+optimism_sepolia = { key = "Z7VJAPYJGJ64Y7VYBGFNNIZMPFT1IJ1BAX", url = "https://api-sepolia-optimistic.etherscan.io/api" }
+arbitrum_sepolia = { key = "E3CG2BG6ITPSA26WWSXM2PWRT5EUID9YAQ", url = "https://api-sepolia.arbiscan.io/api" }

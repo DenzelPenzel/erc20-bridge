@@ -9,9 +9,10 @@ import {
 import { Type } from 'class-transformer';
 
 export class GetTransactionsDto {
+  @IsOptional()
   @IsString()
   @IsEthereumAddress()
-  recipient: string;
+  recipient?: string;
 
   @IsOptional()
   @Type(() => Number)
