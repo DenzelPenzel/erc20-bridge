@@ -1,0 +1,3 @@
+[submodule "my-erc20-bridge/lib/relay-context-contracts"]
+	path = my-erc20-bridge/lib/relay-context-contracts
+	url = https://github.com/gelatodigital/relay-context-contracts

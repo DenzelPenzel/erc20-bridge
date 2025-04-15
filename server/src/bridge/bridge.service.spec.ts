@@ -3,17 +3,30 @@ import { BridgeService } from './bridge.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { Network, TransactionStatus } from '../types';
-import { GelatoRelay } from '@gelatonetwork/relay-sdk';
+import { GelatoRelay } from '@gelatonetwork/relay-sdk-viem';
 import { ethers } from 'ethers';
+import { privateKeyToAccount } from 'viem/accounts';
+import { arbitrumSepolia, optimismSepolia } from 'viem/chains';
+import { createWalletClient, http } from 'viem';
 
-jest.mock('@gelatonetwork/relay-sdk');
+jest.mock('@gelatonetwork/relay-sdk-viem');
 jest.mock('ethers');
+jest.mock('viem/accounts');
+jest.mock('viem', () => ({
+  createWalletClient: jest.fn(),
+  http: jest.fn(),
+  createPublicClient: jest.fn(),
+  parseAbi: jest.fn(),
+  encodeFunctionData: jest.fn(),
+  parseEther: jest.fn(),
+}));
 
 describe('BridgeService', () => {
   let service: BridgeService;
   let prismaService: PrismaService;
   let configService: ConfigService;
-  let mockGelatoSponsoredCall: jest.SpyInstance;
+  let mockGelatoSponsoredCallERC2771: jest.SpyInstance;
+  let mockWalletClient: any;
 
   const mockTransactions = [
     {
@@ -52,10 +65,31 @@ describe('BridgeService', () => {
         }) as any,
     );
 
-    mockGelatoSponsoredCall = jest
+    // Mock wallet client
+    mockWalletClient = {
+      sendTransaction: jest.fn(),
+      account: {
+        address: '0xDummyAddress',
+      },
+    };
+
+    // Mock the Gelato Relay sponsoredCallERC2771 method
+    mockGelatoSponsoredCallERC2771 = jest
       .fn()
       .mockResolvedValue({ taskId: 'mock-task-id' });
-    (GelatoRelay.prototype as any).sponsoredCall = mockGelatoSponsoredCall;
+    (GelatoRelay.prototype as any).sponsoredCallERC2771 =
+      mockGelatoSponsoredCallERC2771;
+
+    // Mock createWalletClient to return our mockWalletClient
+    (createWalletClient as jest.Mock).mockReturnValue(mockWalletClient);
+    (http as jest.Mock).mockReturnValue('http-transport');
+
+    // Mock privateKeyToAccount
+    (privateKeyToAccount as jest.Mock).mockReturnValue({
+      address: '0xBridgeOperatorAddress',
+      signMessage: jest.fn(),
+      signTransaction: jest.fn(),
+    });
 
     const mockContract = {
       address: '0xMockContractAddress',
@@ -77,8 +111,9 @@ describe('BridgeService', () => {
 
     const mockConfigValues = {
       GELATO_API_KEY: 'mock-api-key',
-      BRIDGE_OPERATOR_PRIVATE_KEY:
+      PRIVATE_KEY:
         '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      BRIDGE_OPERATOR_ADDRESS: '0xBridgeOperatorAddress',
       ARBITRUM_SEPOLIA_RPC_URL: 'https://sepolia-rollup.arbitrum.io/rpc',
       OPTIMISM_SEPOLIA_RPC_URL: 'https://sepolia.optimism.io',
       ARBITRUM_ERC20_ADDRESS: '0xArbitrumERC20Address',
@@ -210,7 +245,11 @@ describe('BridgeService', () => {
     });
 
     it('should throw if Gelato API key is not configured', async () => {
-      jest.spyOn(configService, 'get').mockReturnValueOnce(null);
+      jest
+        .spyOn(configService, 'get')
+        .mockImplementation((key) =>
+          key === 'GELATO_API_KEY' ? null : 'mock-value',
+        );
 
       await expect(
         service.processBridgeRequest(
@@ -236,16 +275,21 @@ describe('BridgeService', () => {
         message: 'Bridge transaction initiated successfully',
       });
 
-      expect(mockGelatoSponsoredCall).toHaveBeenCalledWith(
+      expect(createWalletClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chain: arbitrumSepolia,
+        }),
+      );
+
+      expect(mockGelatoSponsoredCallERC2771).toHaveBeenCalledWith(
         expect.objectContaining({
           chainId: BigInt(421614), // Arbitrum Sepolia
           target: '0xMockContractAddress',
           data: '0xMockEncodedData',
+          user: '0xBridgeOperatorAddress',
         }),
+        mockWalletClient,
         'mock-api-key',
-        expect.objectContaining({
-          gasLimit: BigInt(1000000),
-        }),
       );
     });
 
@@ -263,17 +307,24 @@ describe('BridgeService', () => {
         message: 'Bridge transaction initiated successfully',
       });
 
-      expect(mockGelatoSponsoredCall).toHaveBeenCalledWith(
+      expect(createWalletClient).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chain: optimismSepolia,
+        }),
+      );
+
+      expect(mockGelatoSponsoredCallERC2771).toHaveBeenCalledWith(
         expect.objectContaining({
           chainId: BigInt(11155420), // Optimism Sepolia
+          user: '0xBridgeOperatorAddress',
         }),
+        mockWalletClient,
         'mock-api-key',
-        expect.anything(),
       );
     });
 
     it('should handle Gelato API errors gracefully', async () => {
-      mockGelatoSponsoredCall.mockRejectedValueOnce(
+      mockGelatoSponsoredCallERC2771.mockRejectedValueOnce(
         new Error('Gelato API error'),
       );
 

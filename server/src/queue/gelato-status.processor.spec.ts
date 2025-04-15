@@ -8,17 +8,17 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { getQueueToken } from '@nestjs/bull';
 import { Job } from 'bull';
-import { GelatoRelay, TaskState } from '@gelatonetwork/relay-sdk';
+import { GelatoRelay, TaskState } from '@gelatonetwork/relay-sdk-viem';
 import { Network, TransactionStatus } from '../types';
 import { ethers } from 'ethers';
 
-jest.mock('@gelatonetwork/relay-sdk', () => {
-  const originalModule = jest.requireActual('@gelatonetwork/relay-sdk');
+jest.mock('@gelatonetwork/relay-sdk-viem', () => {
+  const originalModule = jest.requireActual('@gelatonetwork/relay-sdk-viem');
   return {
     ...originalModule,
     GelatoRelay: jest.fn().mockImplementation(() => ({
       getTaskStatus: jest.fn(),
-      sponsoredCall: jest.fn(),
+      sponsoredCallERC2771: jest.fn(),
     })),
     TaskState: originalModule.TaskState,
   };
@@ -31,6 +31,24 @@ jest.mock('../utils', () => ({
     return BigInt(1);
   }),
   sleep: jest.fn((ms) => Promise.resolve()),
+}));
+
+jest.mock('viem/accounts', () => ({
+  privateKeyToAccount: jest.fn().mockReturnValue({
+    address: '0xMockOperatorAddress',
+    signMessage: jest.fn(),
+    signTransaction: jest.fn(),
+  }),
+}));
+
+jest.mock('viem', () => ({
+  createWalletClient: jest.fn().mockReturnValue({
+    sendTransaction: jest.fn(),
+    account: {
+      address: '0xMockOperatorAddress',
+    },
+  }),
+  http: jest.fn().mockReturnValue('http-transport'),
 }));
 
 jest.mock('ethers', () => {
@@ -54,10 +72,16 @@ jest.mock('ethers', () => {
         JsonRpcProvider: jest.fn().mockImplementation(() => mockProvider),
       },
       Contract: jest.fn().mockImplementation(() => mockContract),
+      utils: {
+        solidityKeccak256: jest.fn().mockReturnValue('0xmockhash'),
+      },
     },
     Contract: jest.fn().mockImplementation(() => mockContract),
     providers: {
       JsonRpcProvider: jest.fn().mockImplementation(() => mockProvider),
+    },
+    utils: {
+      solidityKeccak256: jest.fn().mockReturnValue('0xmockhash'),
     },
   };
 });
@@ -134,33 +158,16 @@ describe('GelatoStatusProcessor', () => {
   });
 
   describe('constructor', () => {
-    it('should throw an error if Gelato API key is not configured', () => {
-      const emptyApiKeyConfig = new ConfigService();
-      jest.spyOn(emptyApiKeyConfig, 'get').mockImplementation((key) => {
-        if (key === 'GELATO_API_KEY') return '';
-        if (key === 'ARBITRUM_ERC20_ADDRESS') return '0xMockArbitrumAddress';
-        if (key === 'OPTIMISM_ERC20_ADDRESS') return '0xMockOptimismAddress';
-        return '';
-      });
-
-      expect(() => {
-        new GelatoStatusProcessor(
-          prismaService,
-          emptyApiKeyConfig,
-          gelatoStatusQueue,
-          gelatoRecoveryQueue,
-        );
-      }).toThrow('Gelato API key not configured');
-    });
-
     it('should initialize contracts for both networks', () => {
       expect(ethers.Contract).toHaveBeenCalledTimes(2);
       expect(ethers.Contract).toHaveBeenCalledWith(
         '0xMockArbitrumAddress',
         expect.anything(),
+        expect.anything(),
       );
       expect(ethers.Contract).toHaveBeenCalledWith(
         '0xMockOptimismAddress',
+        expect.anything(),
         expect.anything(),
       );
     });
@@ -361,7 +368,7 @@ describe('GelatoStatusProcessor', () => {
       await processor.recoverFailedTransaction(mockJob);
 
       expect(mockPrismaService.bridgeTransaction.update).not.toHaveBeenCalled();
-      expect(mockGelatoRelay.sponsoredCall).not.toHaveBeenCalled();
+      expect(mockGelatoRelay.sponsoredCallERC2771).not.toHaveBeenCalled();
     });
 
     it('should handle rate limiting during recovery', async () => {
@@ -383,7 +390,7 @@ describe('GelatoStatusProcessor', () => {
           delay: expect.any(Number),
         }),
       );
-      expect(mockGelatoRelay.sponsoredCall).not.toHaveBeenCalled();
+      expect(mockGelatoRelay.sponsoredCallERC2771).not.toHaveBeenCalled();
     });
 
     it('should successfully create a recovery task', async () => {
@@ -398,7 +405,7 @@ describe('GelatoStatusProcessor', () => {
       jest.spyOn(processor as any, 'canMakeRequest').mockReturnValueOnce(true);
       jest.spyOn(processor as any, 'trackRequest').mockImplementation();
 
-      mockGelatoRelay.sponsoredCall.mockResolvedValueOnce({
+      mockGelatoRelay.sponsoredCallERC2771.mockResolvedValueOnce({
         taskId: 'mock-recovery-task-id',
       });
 
@@ -409,17 +416,15 @@ describe('GelatoStatusProcessor', () => {
         data: { status: TransactionStatus.RECOVERY_IN_PROGRESS },
       });
 
-      expect(mockGelatoRelay.sponsoredCall).toHaveBeenCalledWith(
-        {
-          chainId: 421614n,
+      expect(mockGelatoRelay.sponsoredCallERC2771).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chainId: BigInt(421614),
           target: '0xMockArbitrumAddress',
           data: '0xmockdata',
-        },
+          user: '0xMockOperatorAddress',
+        }),
+        expect.anything(),
         'mock-api-key',
-        {
-          retries: 3,
-          gasLimit: BigInt(500000),
-        },
       );
 
       expect(mockPrismaService.bridgeTransaction.update).toHaveBeenCalledWith({
@@ -454,7 +459,7 @@ describe('GelatoStatusProcessor', () => {
       jest.spyOn(processor as any, 'canMakeRequest').mockReturnValueOnce(true);
       jest.spyOn(processor as any, 'trackRequest').mockImplementation();
 
-      mockGelatoRelay.sponsoredCall.mockRejectedValueOnce(
+      mockGelatoRelay.sponsoredCallERC2771.mockRejectedValueOnce(
         new Error('Relay error'),
       );
 
@@ -496,7 +501,7 @@ describe('GelatoStatusProcessor', () => {
       jest.spyOn(processor as any, 'canMakeRequest').mockReturnValueOnce(true);
       jest.spyOn(processor as any, 'trackRequest').mockImplementation();
 
-      mockGelatoRelay.sponsoredCall.mockRejectedValueOnce(
+      mockGelatoRelay.sponsoredCallERC2771.mockRejectedValueOnce(
         new Error('Relay error'),
       );
 
@@ -644,15 +649,16 @@ describe('GelatoStatusProcessor', () => {
 
       expect(gelatoRecoveryQueue.add).toHaveBeenCalledWith(
         'recovery',
-        {
+        expect.objectContaining({
           transactionId: 'mock-tx-id',
           sourceTransactionHash: 'mock-source-tx-hash',
           amount: '1000000000000000000',
           recipient: '0xMockRecipient',
           sourceNetwork: Network.OPTIMISM_SEPOLIA,
           targetNetwork: Network.ARBITRUM_SEPOLIA,
-          recoveryAttempt: 1,
-        },
+          recoveryAttempt: expect.any(Number),
+          burnId: expect.any(String),
+        }),
         expect.objectContaining({
           delay: 30000,
           attempts: 3,

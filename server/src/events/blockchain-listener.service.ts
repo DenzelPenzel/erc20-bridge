@@ -136,7 +136,6 @@ export class BlockchainListenerService implements OnModuleInit {
       const burnFilter = contract.filters.TokensBurned();
       const mintFilter = contract.filters.TokensMinted();
 
-      // Query for missed events
       const missedBurnEvents = await contract.queryFilter(
         burnFilter,
         lastKnownBlock + 1,
@@ -155,13 +154,21 @@ export class BlockchainListenerService implements OnModuleInit {
 
       // Process missed events
       for (const event of missedBurnEvents) {
-        const [from, amount] = event.args as [string, ethers.BigNumber];
-        await this.processBurnEvent(from, amount, event, network);
+        const [from, amount, burnId] = event.args as [
+          string,
+          ethers.BigNumber,
+          string,
+        ];
+        await this.processBurnEvent(from, amount, burnId, event, network);
       }
 
       for (const event of missedMintEvents) {
-        const [to, amount] = event.args as [string, ethers.BigNumber];
-        await this.processMintEvent(to, amount, event, network);
+        const [to, amount, burnId] = event.args as [
+          string,
+          ethers.BigNumber,
+          string,
+        ];
+        await this.processMintEvent(to, amount, burnId, event, network);
       }
     } catch (error) {
       this.logger.error(`Error checking for missed events: ${error.message}`);
@@ -177,13 +184,18 @@ export class BlockchainListenerService implements OnModuleInit {
 
     contract.on(
       burnFilter,
-      async (from: string, amount: ethers.BigNumber, event: ethers.Event) => {
+      async (
+        from: string,
+        amount: ethers.BigNumber,
+        burnId: string,
+        event: ethers.Event,
+      ) => {
         this.logger.log(
-          `TokensBurned event detected on ${network}: from=${from}, amount=${amount.toString()}`,
+          `TokensBurned event detected on ${network}: from=${from}, amount=${amount.toString()}, burnId=${burnId}`,
         );
 
         try {
-          await this.processBurnEvent(from, amount, event, network);
+          await this.processBurnEvent(from, amount, burnId, event, network);
           // Update the last processed block
           if (event.blockNumber) {
             updateLastBlock(event.blockNumber);
@@ -206,13 +218,18 @@ export class BlockchainListenerService implements OnModuleInit {
 
     contract.on(
       mintFilter,
-      async (to: string, amount: ethers.BigNumber, event: ethers.Event) => {
+      async (
+        to: string,
+        amount: ethers.BigNumber,
+        burnId: string,
+        event: ethers.Event,
+      ) => {
         this.logger.log(
-          `TokensMinted event detected on ${network}: to=${to}, amount=${amount.toString()}`,
+          `TokensMinted event detected on ${network}: to=${to}, amount=${amount.toString()}, burnId=${burnId}`,
         );
 
         try {
-          await this.processMintEvent(to, amount, event, network);
+          await this.processMintEvent(to, amount, burnId, event, network);
           if (event.blockNumber) {
             updateLastBlock(event.blockNumber);
           }
@@ -228,6 +245,7 @@ export class BlockchainListenerService implements OnModuleInit {
   private async processBurnEvent(
     from: string,
     amount: ethers.BigNumber,
+    burnId: string,
     event: ethers.Event,
     network: Network,
   ) {
@@ -256,6 +274,7 @@ export class BlockchainListenerService implements OnModuleInit {
         targetNetwork,
         sourceTransactionHash: event.transactionHash,
         blockHash: event.blockHash,
+        burnId: burnId,
         status: TransactionStatus.PENDING,
       },
     });
@@ -266,6 +285,7 @@ export class BlockchainListenerService implements OnModuleInit {
       sourceNetwork: network,
       targetNetwork,
       sourceTransactionHash: event.transactionHash,
+      burnId: burnId,
     };
 
     await this.bridgeQueue.add('processBurn', bridgeRequest, {
@@ -284,6 +304,7 @@ export class BlockchainListenerService implements OnModuleInit {
   private async processMintEvent(
     to: string,
     amount: ethers.BigNumber,
+    burnId: string,
     event: ethers.Event,
     network: Network,
   ) {
@@ -307,6 +328,7 @@ export class BlockchainListenerService implements OnModuleInit {
         sourceTransactionHash: event.transactionHash,
         targetTransactionHash: event.transactionHash,
         blockHash: event.blockHash,
+        burnId: burnId,
         status: TransactionStatus.COMPLETED,
       },
     });

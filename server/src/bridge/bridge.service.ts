@@ -1,10 +1,16 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ethers } from 'ethers';
-import { GelatoRelay } from '@gelatonetwork/relay-sdk';
+import {
+  GelatoRelay,
+  CallWithERC2771Request,
+} from '@gelatonetwork/relay-sdk-viem';
 import { Network, TransactionStatus } from '../types';
 import MockERC20Abi from '../contracts/abi/MockERC20.json';
 import { PrismaService } from '../prisma/prisma.service';
+import { createWalletClient, http, type Chain } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { arbitrumSepolia, optimismSepolia } from 'viem/chains';
 
 @Injectable()
 export class BridgeService {
@@ -12,7 +18,7 @@ export class BridgeService {
   private readonly gelatoRelay: GelatoRelay;
   private readonly providers: Record<Network, ethers.providers.JsonRpcProvider>;
   private readonly contracts: Record<Network, ethers.Contract>;
-  private readonly bridgeOperator: Record<Network, ethers.Wallet>;
+  private readonly chains: Record<Network, Chain>;
 
   constructor(
     private prisma: PrismaService,
@@ -29,44 +35,53 @@ export class BridgeService {
       ),
     };
 
-    this.gelatoRelay = new GelatoRelay();
-
-    const privateKey =
-      this.configService.get<string>('BRIDGE_OPERATOR_PRIVATE_KEY') ||
-      '0x0000000000000000000000000000000000000000000000000000000000000001';
-
-    this.bridgeOperator = {
-      [Network.ARBITRUM_SEPOLIA]: new ethers.Wallet(
-        privateKey,
-        this.providers[Network.ARBITRUM_SEPOLIA],
-      ),
-      [Network.OPTIMISM_SEPOLIA]: new ethers.Wallet(
-        privateKey,
-        this.providers[Network.OPTIMISM_SEPOLIA],
-      ),
+    this.chains = {
+      [Network.ARBITRUM_SEPOLIA]: arbitrumSepolia,
+      [Network.OPTIMISM_SEPOLIA]: optimismSepolia,
     };
+
+    this.gelatoRelay = new GelatoRelay({
+      contract: {
+        relay1BalanceERC2771: '0xd8253782c45a12053594b9deB72d8e8aB2Fca54c',
+        relayERC2771: '',
+        relayERC2771zkSync: '',
+        relayERC2771Abstract: '',
+        relay1BalanceERC2771zkSync: '',
+        relay1BalanceERC2771Abstract: '',
+        relayConcurrentERC2771: '',
+        relay1BalanceConcurrentERC2771: '',
+        relayConcurrentERC2771zkSync: '',
+        relayConcurrentERC2771Abstract: '',
+        relay1BalanceConcurrentERC2771zkSync: '',
+        relay1BalanceConcurrentERC2771Abstract: '',
+      },
+    });
 
     this.contracts = {
       [Network.ARBITRUM_SEPOLIA]: new ethers.Contract(
         this.configService.get<string>('ARBITRUM_ERC20_ADDRESS') || '',
         MockERC20Abi,
-        this.bridgeOperator[Network.ARBITRUM_SEPOLIA],
+        this.providers[Network.ARBITRUM_SEPOLIA],
       ),
       [Network.OPTIMISM_SEPOLIA]: new ethers.Contract(
         this.configService.get<string>('OPTIMISM_ERC20_ADDRESS') || '',
         MockERC20Abi,
-        this.bridgeOperator[Network.OPTIMISM_SEPOLIA],
+        this.providers[Network.OPTIMISM_SEPOLIA],
       ),
     };
   }
 
   async getUserTransactions(
-    recipient: string,
+    recipient?: string,
     limit: number = 10,
     offset: number = 0,
     status?: string[],
   ) {
-    const whereClause: any = { recipient };
+    const whereClause: any = {};
+
+    if (recipient) {
+      whereClause.recipient = recipient;
+    }
 
     if (status && status.length > 0) {
       whereClause.status = { in: status };
@@ -142,22 +157,32 @@ export class BridgeService {
         amountInWei,
       ]);
 
-      const sourceChainId =
-        sourceNetwork === Network.ARBITRUM_SEPOLIA
-          ? BigInt(421614) // Arbitrum Sepolia
-          : BigInt(11155420); // Optimism Sepolia
+      const privateKey = this.configService.get<string>('PRIVATE_KEY');
+      const account = privateKeyToAccount(privateKey as `0x${string}`);
 
-      const burnRequest = {
-        chainId: sourceChainId,
-        target: sourceContract.address,
-        data: burnData,
+      const walletClient = createWalletClient({
+        account,
+        chain: this.chains[sourceNetwork],
+        transport: http(
+          sourceNetwork === Network.ARBITRUM_SEPOLIA
+            ? this.configService.get<string>('ARBITRUM_SEPOLIA_RPC_URL') ||
+                'https://sepolia-rollup.arbitrum.io/rpc'
+            : this.configService.get<string>('OPTIMISM_SEPOLIA_RPC_URL') ||
+                'https://sepolia.optimism.io',
+        ),
+      });
+
+      const erc2771Request: CallWithERC2771Request = {
+        chainId: BigInt(this.chains[sourceNetwork].id),
+        target: sourceContract.address as `0x${string}`,
+        data: burnData as `0x${string}`,
+        user: account.address,
       };
-      const { taskId } = await this.gelatoRelay.sponsoredCall(
-        burnRequest,
+
+      const { taskId } = await this.gelatoRelay.sponsoredCallERC2771(
+        erc2771Request,
+        walletClient,
         apiKey,
-        {
-          gasLimit: BigInt(1000000),
-        },
       );
 
       return {

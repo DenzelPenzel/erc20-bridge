@@ -15,7 +15,7 @@ const ActiveTransactions: React.FC = () => {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['active-transactions', account, page],
     queryFn: () => fetchTransactions({
-      address: account || undefined,
+      address: undefined,
       status: [TransactionStatus.PENDING, TransactionStatus.PROCESSING],
       limit: ITEMS_PER_PAGE,
       offset: (page - 1) * ITEMS_PER_PAGE

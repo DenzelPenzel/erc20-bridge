@@ -39,6 +39,7 @@ model BridgeTransaction {
   targetTransactionHash String?
   status                TransactionStatus @default(pending)
   gelatoTaskId          String?
+  burnId                String?           @db.Text
   recoveryAttempts      Int               @default(0)
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
