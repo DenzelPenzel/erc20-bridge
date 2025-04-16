@@ -133,6 +133,11 @@ export class BlockchainListenerService implements OnModuleInit {
         `Checking for missed events on ${network} from block ${lastKnownBlock} to ${currentBlock}`,
       );
 
+      if (lastKnownBlock >= currentBlock) {
+        this.logger.log(`No new blocks to check on ${network}`);
+        return;
+      }
+
       const burnFilter = contract.filters.TokensBurned();
       const mintFilter = contract.filters.TokensMinted();
 
