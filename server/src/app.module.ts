@@ -7,6 +7,7 @@ import { QueueModule } from './queue/queue.module';
 import { EventsModule } from './events/events.module';
 import { BridgeModule } from './bridge/bridge.module';
 import { MintModule } from './mint/mint.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { MintModule } from './mint/mint.module';
     EventsModule,
     BridgeModule,
     MintModule,
+    ScheduleModule.forRoot(),
   ],
   controllers: [AppController],
   providers: [AppService],
