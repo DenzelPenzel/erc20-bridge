@@ -191,6 +191,8 @@ export class BridgeProcessor {
           data: { status: TransactionStatus.FAILED },
         });
       }
+
+      throw error;
     }
   }
 }

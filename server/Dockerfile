@@ -2,8 +2,8 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Install Python and build dependencies
-RUN apk add --no-cache python3 make g++ gcc
+# Install Python, build dependencies, and PostgreSQL client
+RUN apk add --no-cache python3 make g++ gcc postgresql-client
 
 COPY package*.json ./
 COPY pnpm-lock.yaml ./
@@ -20,4 +20,8 @@ RUN pnpm run build
 
 EXPOSE 3001
 
-CMD ["sh", "-c", "npx prisma migrate deploy && pnpm run start:prod"]
+# Create a startup script to handle database initialization and migration
+COPY ./docker-entrypoint.sh /
+RUN chmod +x /docker-entrypoint.sh
+
+CMD ["/docker-entrypoint.sh"]
