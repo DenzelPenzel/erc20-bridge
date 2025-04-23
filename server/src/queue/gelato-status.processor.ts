@@ -49,7 +49,7 @@ export class GelatoStatusProcessor {
   private readonly providers: Record<Network, ethers.providers.JsonRpcProvider>;
 
   private readonly rateLimitWindow = 60000; // 1 minute
-  private readonly maxRequestsPerWindow = 1; // Maximum requests per minute
+  private readonly maxRequestsPerWindow = 10; // Maximum requests per minute
   private requestTimestamps: number[] = [];
 
   constructor(

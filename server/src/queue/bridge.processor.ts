@@ -158,7 +158,7 @@ export class BridgeProcessor {
       );
 
       this.logger.log(`Gelato task created with ID: ${taskId}`);
-
+      
       await this.gelatoStatusQueue.add(
         'check-status',
         {

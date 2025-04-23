@@ -43,9 +43,9 @@ export class BlockchainListenerService implements OnModuleInit {
         'optimism-sepolia',
       ),
     };
-    
+
     Object.values(this.providers).forEach(provider => {
-      provider.pollingInterval = 15000; 
+      provider.pollingInterval = 15000;
       provider.getNetwork = provider.getNetwork.bind(provider);
     });
 
@@ -67,7 +67,7 @@ export class BlockchainListenerService implements OnModuleInit {
     this.logger.log('Starting blockchain event listeners');
 
     await this.initializeProviders();
-    
+
     this.listenToEvents(Network.ARBITRUM_SEPOLIA);
     this.listenToEvents(Network.OPTIMISM_SEPOLIA);
   }
@@ -77,7 +77,7 @@ export class BlockchainListenerService implements OnModuleInit {
       try {
         await Promise.race([
           this.providers[network].getBlockNumber(),
-          new Promise<never>((_, reject) => 
+          new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error('Initial connection timeout')), 10000)
           )
         ]);
@@ -97,24 +97,24 @@ export class BlockchainListenerService implements OnModuleInit {
   @Interval(60000)
   async checkProvidersHealth() {
     this.logger.debug('Running provider health check');
-    
+
     for (const network of Object.values(Network)) {
       if (!this.providerHealthStatus[network]) {
         this.logger.log(`Provider for ${network} is unhealthy, skipping health check`);
         continue;
       }
-      
+
       try {
         await Promise.race([
           this.providers[network].getBlockNumber(),
-          new Promise<never>((_, reject) => 
+          new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error('Health check timeout')), 10000)
           )
         ]);
-        
+
         this.logger.debug(`Health check passed for ${network}`);
-        
-        if (this.usingBackupRpc[network] && Math.random() < 0.2) { 
+
+        if (this.usingBackupRpc[network] && Math.random() < 0.2) {
           this.logger.log(`Attempting to switch back to primary RPC for ${network}`);
           this.usingBackupRpc[network] = false;
           this.reconnectProvider(network, 0);
@@ -166,7 +166,7 @@ export class BlockchainListenerService implements OnModuleInit {
     if (this.reconnectAttempts[network] >= this.MAX_RECONNECT_ATTEMPTS) {
       const resetDelay = 60000; // 1 minute
       this.logger.warn(
-        `Max reconnection attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached for ${network}, waiting ${resetDelay/1000}s before trying again`,
+        `Max reconnection attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached for ${network}, waiting ${resetDelay / 1000}s before trying again`,
       );
       setTimeout(() => {
         this.reconnectAttempts[network] = 0;
@@ -180,13 +180,13 @@ export class BlockchainListenerService implements OnModuleInit {
       this.BASE_RECONNECT_DELAY * Math.pow(2, attempt),
       60000 // Max 1 minute delay
     );
-    
+
     this.logger.log(`Attempting to reconnect provider for ${network} (attempt ${attempt + 1})...`);
     this.reconnectAttempts[network]++;
 
     try {
       const useBackup = this.reconnectAttempts[network] >= 3 && !this.usingBackupRpc[network];
-      
+
       let rpcUrl;
       if (useBackup) {
         rpcUrl = network === Network.ARBITRUM_SEPOLIA
@@ -212,12 +212,12 @@ export class BlockchainListenerService implements OnModuleInit {
         rpcUrl,
         networkName,
       );
-      
+
       newProvider.pollingInterval = 15000;
 
       await Promise.race([
         newProvider.ready,
-        new Promise((_, reject) => 
+        new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Provider connection timeout')), 30000)
         )
       ]);
@@ -235,7 +235,7 @@ export class BlockchainListenerService implements OnModuleInit {
 
       this.reconnectAttempts[network] = 0;
       this.providerHealthStatus[network] = true;
-      
+
       if (!useBackup && this.usingBackupRpc[network]) {
         this.usingBackupRpc[network] = false;
         this.logger.log(`Successfully reconnected to primary RPC for ${network}`);
@@ -253,7 +253,7 @@ export class BlockchainListenerService implements OnModuleInit {
       this.logger.error(
         `Failed to reconnect provider for ${network} (attempt ${attempt + 1}): ${error.message}`,
       );
-      
+
       // Schedule next attempt
       setTimeout(() => this.reconnectProvider(network, lastKnownBlock), delay);
     }
@@ -263,10 +263,10 @@ export class BlockchainListenerService implements OnModuleInit {
     try {
       const provider = this.providers[network];
       const contract = this.contracts[network];
-      
+
       const currentBlock = await Promise.race([
         provider.getBlockNumber(),
-        new Promise<never>((_, reject) => 
+        new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('getBlockNumber timeout')), 15000)
         )
       ]);
@@ -293,7 +293,7 @@ export class BlockchainListenerService implements OnModuleInit {
           startBlock,
           endBlock,
         ),
-        new Promise<never>((_, reject) => 
+        new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('queryFilter timeout for burn events')), 30000)
         )
       ]);
@@ -304,7 +304,7 @@ export class BlockchainListenerService implements OnModuleInit {
           startBlock,
           endBlock,
         ),
-        new Promise<never>((_, reject) => 
+        new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('queryFilter timeout for mint events')), 30000)
         )
       ]);

@@ -34,6 +34,30 @@ fi
 echo "Running database migrations..."
 npx prisma migrate deploy
 
-# Start the application
+echo "Checking if database needs restoration..."
+record_count=$(PGPASSWORD=postgres psql -h postgres -U postgres -d erc20_bridge -t -c "SELECT COUNT(*) FROM bridge_transactions;" 2>/dev/null || echo "0")
+record_count=$(echo $record_count | tr -d ' ')
+
+if [ "$record_count" = "0" ]; then
+  echo "Database appears to be empty. Checking for backups to restore..."
+  
+  latest_backup=$(ls -t /backup/erc20_bridge_*.sql.gz 2>/dev/null | head -n 1)
+  
+  if [ -n "$latest_backup" ]; then
+    echo "Found backup: $latest_backup. Attempting to restore..."
+    
+    backup_filename=$(basename "$latest_backup")
+    
+    echo "Executing restore from $backup_filename"
+    PGPASSWORD=postgres /scripts/restore-database.sh "$backup_filename"
+    
+    echo "Database restored successfully!"
+  else
+    echo "No backups found. Starting with a fresh database."
+  fi
+else
+  echo "Database already contains data. No restoration needed."
+fi
+
 echo "Starting the application..."
 exec pnpm run start:prod

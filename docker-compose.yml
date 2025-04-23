@@ -13,6 +13,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./server/prisma/init-scripts:/docker-entrypoint-initdb.d
+      - ./backups:/backup
     ports:
       - "5432:5432"
     healthcheck:
@@ -20,6 +21,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    command: [
+      "postgres",
+      "-c", "max_connections=200",
+      "-c", "shared_buffers=256MB",
+      "-c", "wal_level=replica",
+      "-c", "archive_mode=on",
+      "-c", "archive_command='test ! -f /backup/%f && cp %p /backup/%f'"
+    ]
 
   redis:
     image: redis:7-alpine
@@ -47,6 +56,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - ./server/scripts:/scripts
+      - ./backups:/backup
     environment:
       - PORT=3001
       - NODE_ENV=production
@@ -77,6 +89,25 @@ services:
       - REACT_APP_OPTIMISM_ERC20_ADDRESS=${OPTIMISM_ERC20_ADDRESS}
     ports:
       - "80:80"
+
+  # Database backup service
+  backup:
+    image: postgres:15
+    container_name: erc20-bridge-backup
+    restart: always
+    depends_on:
+      - postgres
+    volumes:
+      - ./server/scripts:/scripts
+      - ./backups:/backup
+    environment:
+      PGPASSWORD: postgres
+    entrypoint: ["/bin/sh", "-c"]
+    command: [
+      "mkdir -p /backup && chmod +x /scripts/backup-database.sh && \
+       echo '0 */6 * * * /scripts/backup-database.sh > /backup/backup.log 2>&1' > /var/spool/cron/crontabs/root && \
+       crond -f -l 8"
+    ]
 
 volumes:
   postgres-data:

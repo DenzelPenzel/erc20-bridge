@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BridgeProcessor } from './bridge.processor';
 import { GelatoStatusProcessor } from './gelato-status.processor';
 import { BridgeModule } from '../bridge/bridge.module';
+import { QueueUIModule } from './queue-ui/queue-ui.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { BridgeModule } from '../bridge/bridge.module';
       { name: 'gelato-recovery' },
     ),
     BridgeModule,
+    QueueUIModule,
   ],
   providers: [BridgeProcessor, GelatoStatusProcessor],
   exports: [BullModule],
