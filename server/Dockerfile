@@ -2,7 +2,6 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Install Python, build dependencies, and PostgreSQL client
 RUN apk add --no-cache python3 make g++ gcc postgresql-client
 
 COPY package*.json ./
@@ -20,7 +19,6 @@ RUN pnpm run build
 
 EXPOSE 3001
 
-# Create a startup script to handle database initialization and migration
 COPY ./docker-entrypoint.sh /
 RUN chmod +x /docker-entrypoint.sh
 

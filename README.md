@@ -9,7 +9,7 @@ The project consists of three main components:
 
 ### 1. `my-erc20-bridge`
 Smart contract implementation of the ERC20 bridge using Foundry framework:
-- `src/`: Contains the smart contract code, including `MockERC20.sol`
+- `src/`: Contains the smart contract code, including `BridgeToken.sol`
 - `script/`: Deployment scripts for the contracts
 - `test/`: Contract test files
 - `lib/`: External dependencies and libraries

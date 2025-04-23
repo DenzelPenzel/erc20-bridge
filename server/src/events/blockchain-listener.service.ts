@@ -457,7 +457,7 @@ export class BlockchainListenerService implements OnModuleInit {
       attempts: 3,
       backoff: {
         type: 'exponential',
-        delay: 10000,
+        delay: 30000,
       },
     });
 
